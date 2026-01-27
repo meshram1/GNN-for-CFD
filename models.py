@@ -2,8 +2,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import GCNConv
 from torch_geometric.nn import MessagePassing
+import torch
 
-class PoolModel(torch.nn.Module):
+class PoolModel(nn.Module):
     def __init__(self, hidden_channels):
         super().__init__()
         # Initial Graph Convolution
@@ -11,7 +12,7 @@ class PoolModel(torch.nn.Module):
         self.conv2 = GCNConv(hidden_channels, hidden_channels)
 
         # Regression head to predict your CFD values (e.g., Ux, Uy, P)
-        self.out = torch.nn.Linear(hidden_channels, 5)
+        self.out = nn.Linear(hidden_channels, 5)
 
     def forward(self, data):
         # 1. Obtain node embeddings
@@ -24,43 +25,23 @@ class PoolModel(torch.nn.Module):
         # 2. Node-level output (for the full 50,480 vector prediction)
         return self.out(x)
 #%%
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = PoolModel(64).to(device)
-data = data.to(device)
-data_plus = data_plus.to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
-model.train()
-total_loss = 0
-for epoch in range(200):
-
-    optimizer.zero_grad()
-    out = model(data)
-    loss = F.mse_loss(out, data_plus.x)
-    loss.backward()
-    optimizer.step()
-    total_loss += loss.item()
-
-    # Print average loss for the epoch
-    avg_loss = total_loss / (epoch+1)
-    print(f"Epoch {epoch+1:03d} | Average Loss: {avg_loss:.6f}")
-#%%
 class GNNMessagePassing(MessagePassing):
     def __init__(self, node_input, edge_in, hidden_channels):
         super(GNNMessagePassing, self).__init__(aggr='add')
 
-        self.msg_mlp = Sequential(
+        self.msg_mlp = nn.Sequential(
             nn.Linear(2*hidden_channels + edge_in, hidden_channels),
             nn.ReLU(),
             nn.Linear(hidden_channels, hidden_channels),
         )
-        self.upd_mlp = Sequential(
+        self.upd_mlp = nn.Sequential(
             nn.Linear(2*hidden_channels, hidden_channels),
             nn.ReLU(),
             nn.Linear(hidden_channels, hidden_channels),
         )
 
-    def forward(self, x=x, edge_index=edge_index, edge_attr=edge_attr):
+    def forward(self, x, edge_index, edge_attr):
         return self.propagate(edge_index, x=x, edge_attr=edge_attr)
 
     def message(self,x_i, x_j,edge_attr):
