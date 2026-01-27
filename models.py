@@ -5,7 +5,7 @@ from torch_geometric.nn import MessagePassing
 import torch
 
 class PoolModel(nn.Module):
-    def __init__(self, hidden_channels):
+    def __init__(self, hidden_channels, data):
         super().__init__()
         # Initial Graph Convolution
         self.conv1 = GCNConv(data.num_node_features, hidden_channels)
