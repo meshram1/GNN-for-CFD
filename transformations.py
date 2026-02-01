@@ -25,7 +25,6 @@ def normalize_fluid_data(u, v, p, step=100, eps=1e-12):
         normalized_outputs['p'],
     )
 
-
 def denormalize_fluid_data(u_pred, v_pred, p_pred, u, v, p, step, eps=1e-12):
     iters = {
         'u': u[step],
