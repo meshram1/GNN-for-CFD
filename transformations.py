@@ -2,26 +2,11 @@ import numpy as np
 
 
 def normalize_fluid_data(u, v, p, step=100, eps=1e-12):
-    """
-    Normalizes u, v, and p arrays at a specific step and step+1.
-
-    Parameters:
-    - u, v, p: NumPy arrays (expected shape: [time, samples, height, width])
-    - step: The starting time index
-    - eps: Small constant to avoid division by zero
-
-    Returns:
-    - Tuple of 6 normalized arrays: (u_n, v_n, p_n, u_plus_n, v_plus_n, p_plus_n)
-    """
-
     # Extract slices for the current step and the next step
     iters = {
         'u': u[step],
         'v': v[step],
         'p': p[step],
-        'u_plus': u[step + 1],
-        'v_plus': v[step + 1],
-        'p_plus': p[step + 1]
     }
 
     normalized_outputs = {}
@@ -38,7 +23,35 @@ def normalize_fluid_data(u, v, p, step=100, eps=1e-12):
         normalized_outputs['u'],
         normalized_outputs['v'],
         normalized_outputs['p'],
-        normalized_outputs['u_plus'],
-        normalized_outputs['v_plus'],
-        normalized_outputs['p_plus']
     )
+
+
+def denormalize_fluid_data(u_pred, v_pred, p_pred, u, v, p, step, eps=1e-12):
+    iters = {
+        'u': u[step],
+        'v': v[step],
+        'p': p[step],
+    }
+
+    preds = {
+        'u': u_pred,
+        'v': v_pred,
+        'p': p_pred,
+    }
+
+    denormalized_preds = {}
+
+    for key, data in iters.items():
+        # Calculate mean and std along the first axis of the slice (e.g., samples/channels)
+        mean = data.mean(axis=0)
+        std = data.std(axis=0)
+
+        # Apply normalization formula: (x - mean) / (std + eps)
+        denormalized_preds[key] = (preds[key]*(std + eps) + mean)
+
+    return (
+        denormalized_preds['u'],
+        denormalized_preds['v'],
+        denormalized_preds['p'],
+    )
+
