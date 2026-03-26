@@ -17,23 +17,25 @@ def sorted_vtk(pattern):
 
 
 class GraphDataset(Dataset):
-    def __init__(self, cases, xy, edge_index, edge_attr, t_idx, normalize_fn=None):
+    def __init__(self, cases, xy, edge_index, edge_attr, normalize_fn=None):
 
         self.xy = xy.float()
         self.edge_index = edge_index
         self.edge_attr = edge_attr
-        self.t_idx = int(t_idx)
         self.normalize_fn = normalize_fn
 
         self.bank = []
         for case in cases:
             u_all, v_all, p_all = get_fluid_prop(case["files"])  # [T,N]
-
-            uvp = np.stack([u_all, v_all, p_all], axis=-1)       # [T,N,3]
+            u = u_all[-1]
+            v = v_all[-1]
+            p = p_all[-1]      # [T,N,3]
 
             self.bank.append({
-                "uvp": uvp,
-                "g": torch.tensor(case["global_attr"], dtype=torch.float32)
+                "u": u,
+                "v": v,
+                "p": p,
+                "g": torch.tensor(case["global_attr"], dtype=torch.float32).view(1, -1),
             })
 
     def __len__(self):
@@ -42,25 +44,18 @@ class GraphDataset(Dataset):
     def __getitem__(self, i):
         sim = self.bank[i]
 
-        uvp_t = sim["uvp"][self.t_idx]      # [N,3]
- ##       print("shape of uvp_t: ", uvp_t.shape)
-
-        u = uvp_t[:,0]
-        v = uvp_t[:,1]
-        p = uvp_t[:,2]
-        g = sim["g"]
+        u, v, p = sim["u"], sim["v"], sim["p"]
 
         if self.normalize_fn is not None:
             u, v, p = self.normalize_fn(u, v, p, step=None)
 
-        u = np.asarray(u).reshape(-1)
-        v = np.asarray(v).reshape(-1)
-        p = np.asarray(p).reshape(-1)
+        u = np.asarray(u, dtype=np.float32).reshape(-1)
+        v = np.asarray(v, dtype=np.float32).reshape(-1)
+        p = np.asarray(p, dtype=np.float32).reshape(-1)
 
         uvp_stack = np.stack([u, v, p], axis=1).astype(np.float32)
         uvp_tensor =  torch.from_numpy(uvp_stack).float()
-        print("xy:", type(self.xy), self.xy.shape, self.xy.dtype)
-        print("uvp:", type(uvp_tensor), uvp_tensor.shape, uvp_tensor.dtype)
+
         x = torch.cat([self.xy, uvp_tensor], dim=1)   # [N,5]
 
         edge_attr = self.edge_attr
@@ -68,6 +63,7 @@ class GraphDataset(Dataset):
             edge_attr = torch.tensor(edge_attr, dtype=torch.float32)
         elif isinstance(edge_attr, np.ndarray):
             edge_attr = torch.from_numpy(edge_attr).float()
+
         edge_index = self.edge_index
         if isinstance(edge_index, list):
             edge_index = torch.tensor(edge_index)
@@ -77,13 +73,13 @@ class GraphDataset(Dataset):
         # If it's [E,2], transpose it:
         if edge_index.dim() == 2 and edge_index.size(0) != 2 and edge_index.size(1) == 2:
             edge_index = edge_index.t()
-
         edge_index = edge_index.long().contiguous()
         return Data(
             x=x,
             edge_index=edge_index,
             edge_attr=edge_attr,
-            global_attr=g
+            global_attr=sim["g"]
+
         )
 
 
