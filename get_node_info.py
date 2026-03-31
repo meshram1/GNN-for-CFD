@@ -1,35 +1,37 @@
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torchvision import datasets, transforms
-import matplotlib.pyplot as plt
-import pyvista as pv
-from matplotlib.style.core import library
+"""
+get_node_info.py  –  legacy shim
+
+The active implementation is now in edge_info.read_vtk_2d, which reads a
+VTK file once and returns xy, u, v, p all deduplicated together.
+
+This module is kept for backward compatibility with any notebook cells that
+import get_fluid_prop, but data_processor.py no longer calls it.
+"""
 import numpy as np
+import pyvista as pv
+from edge_info import read_vtk_2d
 
-print("pyvista version used:",pv.__version__)
+print("pyvista version used:", pv.__version__)
 
-def get_fluid_prop(files):
-    # %%
-    all_U = []
-    all_p = []
 
-    # Loop through each file
+def get_fluid_prop(files, inverse=None):
+    """
+    Legacy wrapper.  Returns u, v, p arrays for the last time-step.
+    Shape: [T, N_2d] each.
+
+    NOTE: the `inverse` argument is ignored – deduplication is now handled
+    internally by read_vtk_2d which reads and deduplicates each file
+    independently, guaranteeing consistency.
+    """
+    all_u, all_v, all_p = [], [], []
     for f in files:
-        mesh = pv.read(f)
-        # Inspect available arrays
-        if 'U' in mesh.point_data:
-            U = mesh['U']
-            all_U.append(U)
-        if 'p' in mesh.point_data:
-            p = mesh['p']
-            all_p.append(p)
+        _, _, u, v, p = read_vtk_2d(f)
+        all_u.append(u)
+        all_v.append(v)
+        all_p.append(p)
 
-    # Convert to numpy arrays for ML
-    all_U = np.array(all_U)
-    all_p = np.array(all_p)
-    u = all_U[:, :, 0]
-    v = all_U[:, :, 1]
-    return u, v, all_p
-
-
+    return (
+        np.array(all_u),   # [T, N_2d]
+        np.array(all_v),
+        np.array(all_p),
+    )
