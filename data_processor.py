@@ -20,24 +20,64 @@ class GraphDataset(Dataset):
     Graph dataset for 2-D CFD surrogate.
 
     Each case is a dict with:
-        "files"       – list of VTK paths (one per time-step)
-        "global_attr" – list/array e.g. [U_mag, AoA]
+        "files"       - list of VTK paths (one per time-step)
+        "global_attr" - list/array e.g. [U_mag, AoA]
 
     The last time-step is used as the target.
 
     Node features:  [x, y, u, v, p]   shape (N_2d, 5)
     Edge features:  [dx, dy, dist]     shape (E, 3)
+
+    Calling conventions
+    -------------------
+    Any of these work:
+
+        # Original canonical form
+        GraphDataset([{"files": ["f0.vtk", "f1.vtk"], "global_attr": [U, AoA]}, ...])
+
+        # Flat list of strings -> each string = its own single-file case
+        GraphDataset(["case0.vtk", "case1.vtk", ...], normalize_fn)
+
+        # Single string -> one case
+        GraphDataset("case0.vtk", normalize_fn)
     """
+
+    @staticmethod
+    def _coerce_cases(cases):
+        """Normalise *cases* to list-of-dicts no matter what was passed in."""
+        if isinstance(cases, str):
+            return [{"files": [cases], "global_attr": []}]
+
+        # Single case dict passed directly instead of wrapped in a list
+        if isinstance(cases, dict):
+            return [cases]
+
+        cases = list(cases)
+        if not cases:
+            return cases
+
+        normalised = []
+        for item in cases:
+            if isinstance(item, str):
+                normalised.append({"files": [item], "global_attr": []})
+            elif isinstance(item, dict):
+                normalised.append(item)
+            else:
+                raise TypeError(
+                    f"GraphDataset: each case must be a path string or a dict, "
+                    f"got {type(item).__name__!r}."
+                )
+        return normalised
 
     def __init__(self, cases, normalize_fn=None):
         self.normalize_fn = normalize_fn
         self.bank = []
 
-        # Cache *topology* per unique mesh (keyed by raw n_cells before dedup)
-        topo_cache = {}  # n_cells_3d → (xy_tensor, edge_index, edge_attr_tensor, inverse)
+        cases = self._coerce_cases(cases)
+
+        topo_cache = {}
 
         for case_idx, case in enumerate(cases):
-            # ── 1. Topology (from first file; all files share the same mesh) ──
             ref_file = case["files"][0]
             ref_mesh = pv.read(ref_file)
             n_cells_3d = ref_mesh.n_cells
@@ -47,21 +87,16 @@ class GraphDataset(Dataset):
             else:
                 edge_arr, xy_np, inverse = edges_from_mesh(ref_mesh)
 
-                xy_t       = torch.tensor(xy_np, dtype=torch.float32)
-                edge_index = torch.tensor(edge_arr.T, dtype=torch.long)
+                xy_t        = torch.tensor(xy_np, dtype=torch.float32)
+                edge_index  = torch.tensor(edge_arr.T, dtype=torch.long)
                 edge_attr_t = torch.tensor(
                     build_edge_feature(xy_np, edge_arr), dtype=torch.float32
                 )
                 topo_cache[n_cells_3d] = (xy_t, edge_index, edge_attr_t, inverse)
 
-            # ── 2. Fluid properties (last time-step) ─────────────────────────
-            # read_vtk_2d reads the SAME file object and deduplicates with its
-            # OWN inverse, guaranteeing N_2d matches xy_t.
             solution_file = case["files"][-1]
             xy_sol, inv_sol, u_2d, v_2d, p_2d = read_vtk_2d(solution_file)
 
-            # Safety check – if the solution file has a different 3D cell count
-            # than the reference, recompute topology from it directly.
             if u_2d.shape[0] != xy_t.shape[0]:
                 print(
                     f"  [case {case_idx}] N_2d mismatch: "
@@ -70,12 +105,11 @@ class GraphDataset(Dataset):
                 )
                 sol_mesh = pv.read(solution_file)
                 edge_arr, xy_np, inverse = edges_from_mesh(sol_mesh)
-                xy_t       = torch.tensor(xy_np, dtype=torch.float32)
-                edge_index = torch.tensor(edge_arr.T, dtype=torch.long)
+                xy_t        = torch.tensor(xy_np, dtype=torch.float32)
+                edge_index  = torch.tensor(edge_arr.T, dtype=torch.long)
                 edge_attr_t = torch.tensor(
                     build_edge_feature(xy_np, edge_arr), dtype=torch.float32
                 )
-                # Re-read fluid with the new inverse
                 xy_sol, inv_sol, u_2d, v_2d, p_2d = read_vtk_2d(solution_file)
 
             self.bank.append({
@@ -89,8 +123,6 @@ class GraphDataset(Dataset):
                     case["global_attr"], dtype=torch.float32
                 ).view(1, -1),
             })
-
-    # ── Dataset protocol ─────────────────────────────────────────────────────
 
     def __len__(self):
         return len(self.bank)
@@ -111,14 +143,13 @@ class GraphDataset(Dataset):
 
         xy = sim["xy"].float()
 
-        # ── guard against latent mismatches (should never trigger now) ──
         if xy.shape[0] != uvp_tensor.shape[0]:
             raise RuntimeError(
                 f"[item {i}] xy rows={xy.shape[0]}, uvp rows={uvp_tensor.shape[0]}. "
-                "This is a bug – both must be N_2d."
+                "This is a bug - both must be N_2d."
             )
 
-        x = torch.cat([xy, uvp_tensor], dim=1)  # [N_2d, 5]
+        x = torch.cat([xy, uvp_tensor], dim=1)
 
         edge_attr  = sim["edge_attr"]
         edge_index = sim["edge_index"].long().contiguous()
@@ -129,3 +160,4 @@ class GraphDataset(Dataset):
             edge_attr=edge_attr,
             global_attr=sim["g"],
         )
+
